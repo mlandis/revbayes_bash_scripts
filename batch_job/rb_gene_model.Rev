@@ -1,0 +1,62 @@
+# print errors for undefined variables
+if (!exists("data_file")) "ERROR: `data_file` undefined"
+if (!exists("type_Q"))    "ERROR: `type_Q` undefined"
+if (!exists("job_id"))    "ERROR: `job_id` undefined"
+
+# settings
+out_prefix = job_id + ".Q_" + type_Q 
+out_fp = "output/"
+
+# move/monitor vector indices
+mni = 1
+mvi = 1
+
+# read data
+data = readDiscreteCharacterData(data_file)
+taxa = data.taxa()
+
+# define tree model
+tree ~ dnBDP(lambda=1, mu=0, rootAge=1, taxa=taxa)
+mv[mvi++] = mvNNI(tree, weight=taxa.size())
+mv[mvi++] = mvNodeTimeSlideUniform(tree, weight=taxa.size())
+
+# define clock model
+clock ~ dnExp(10)
+mv[mvi++] = mvScale(clock, weight=2)
+
+# define rate matrix based on value of type_Q
+if (type_Q=="JC") {
+    Q <- fnJC(4)
+} else if (type_Q=="F81") {
+    bf ~ dnDirichlet([1,1,1,1])
+    mv[mvi++] = mvSimplexElementScale(bf, weight=2)
+    Q := fnF81(bf)
+}
+
+# create phylogenetic model distribution
+seq ~ dnPhyloCTMC(tree=tree,
+                  Q=Q,
+                  branchRates=clock,
+                  nSites=data.nchar(),
+                  type="DNA")
+
+# attach the data
+seq.clamp(data)
+
+# make the model
+mdl = model(seq)
+
+# add monitors
+mn[mni++] = mnScreen(clock, printgen=100)
+mn[mni++] = mnFile(tree, filename=out_fp+out_prefix+".tre", printgen=100)
+mn[mni++] = mnModel(filename=out_fp+out_prefix+".params.log", printgen=100)
+
+# construct MCMC
+ch = mcmc(model=mdl, moves=mv, monitors=mn)
+
+# burn-in then run the analysis
+ch.burnin(5000, 100)
+ch.run(10000)
+
+# quit upon completion
+quit()
